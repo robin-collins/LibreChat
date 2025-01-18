@@ -138,6 +138,11 @@ export default function Artifacts() {
                 currentArtifact.content ?? ''
               }\`\`\``}
               isSubmitting={isSubmitting}
+              filename={(() => {
+                const filename = currentArtifact.title || currentArtifact.identifier;
+                console.log('Artifacts.tsx - filename being passed:', filename);
+                return filename;
+              })()}
             />
           </Tabs.Content>
           <Tabs.Content

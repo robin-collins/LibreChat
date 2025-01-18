@@ -7,16 +7,19 @@ import { handleDoubleClick, langSubset } from '~/utils';
 import Clipboard from '~/components/svg/Clipboard';
 import CheckMark from '~/components/svg/CheckMark';
 import useLocalize from '~/hooks/useLocalize';
+import MonacoEditor from './MonacoEditor';
 
 type TCodeProps = {
   inline: boolean;
   className?: string;
   children: React.ReactNode;
+  filename?: string;
 };
 
-export const code: React.ElementType = memo(({ inline, className, children }: TCodeProps) => {
+export const code: React.ElementType = memo(({ inline, className, children, filename }: TCodeProps) => {
+  console.log('Code.tsx - received filename:', filename);
   const match = /language-(\w+)/.exec(className ?? '');
-  const lang = match && match[1];
+  const lang = match?.[1] ?? undefined;
 
   if (inline) {
     return (
@@ -26,75 +29,88 @@ export const code: React.ElementType = memo(({ inline, className, children }: TC
     );
   }
 
-  return <code className={`hljs language-${lang} !whitespace-pre`}>{children}</code>;
+  const processContent = (children: React.ReactNode): string => {
+    if (Array.isArray(children)) {
+      return children.map(child => processContent(child)).join('');
+    }
+    
+    if (React.isValidElement(children)) {
+      return processContent(children.props.children);
+    }
+    
+    if (typeof children === 'object' && children !== null) {
+      if ('value' in children) {
+        return String(children.value);
+      }
+      if ('raw' in children) {
+        return String(children.raw);
+      }
+      if ('props' in children && 'children' in (children as any).props) {
+        return processContent((children as any).props.children);
+      }
+    }
+    
+    return String(children ?? '');
+  };
+
+  const content = processContent(children);
+  const displayFilename = filename || `untitled${lang ? `.${lang}` : ''}`;
+  
+  return (
+    <div className="relative w-full">
+      <MonacoEditor
+        content={content}
+        language={lang}
+        readOnly={true}
+        className="!bg-gray-900"
+        filename={displayFilename}
+      />
+    </div>
+  );
 });
 
 export const CodeMarkdown = memo(
-  ({ content = '', isSubmitting }: { content: string; isSubmitting: boolean }) => {
+  ({ content = '', isSubmitting, filename }: { content: string; isSubmitting: boolean; filename?: string }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
-    const [userScrolled, setUserScrolled] = useState(false);
-    const currentContent = content;
+    const [currentContent, setCurrentContent] = useState(content);
+    const localize = useLocalize();
+
+    useEffect(() => {
+      if (content !== currentContent) {
+        setCurrentContent(content);
+      }
+    }, [content, currentContent]);
+
+    useEffect(() => {
+      if (scrollRef.current && !isSubmitting) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }, [currentContent, isSubmitting]);
+
     const rehypePlugins = [
       [rehypeKatex, { output: 'mathml' }],
-      [
-        rehypeHighlight,
-        {
-          detect: true,
-          ignoreMissing: true,
-          subset: langSubset,
-        },
-      ],
+      [rehypeHighlight, { detect: true, ignoreMissing: true }],
     ];
-
-    useEffect(() => {
-      const scrollContainer = scrollRef.current;
-      if (!scrollContainer) {
-        return;
-      }
-
-      const handleScroll = () => {
-        const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-        const isNearBottom = scrollHeight - scrollTop - clientHeight < 50;
-
-        if (!isNearBottom) {
-          setUserScrolled(true);
-        } else {
-          setUserScrolled(false);
-        }
-      };
-
-      scrollContainer.addEventListener('scroll', handleScroll);
-
-      return () => {
-        scrollContainer.removeEventListener('scroll', handleScroll);
-      };
-    }, []);
-
-    useEffect(() => {
-      const scrollContainer = scrollRef.current;
-      if (!scrollContainer || !isSubmitting || userScrolled) {
-        return;
-      }
-
-      scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    }, [content, isSubmitting, userScrolled]);
 
     return (
       <div ref={scrollRef} className="max-h-full overflow-y-auto">
-        <ReactMarkdown
-          /* @ts-ignore */
-          rehypePlugins={rehypePlugins}
-          components={
-            { code } as {
-              [key: string]: React.ElementType;
-            }
-          }
-        >
-          {currentContent}
-        </ReactMarkdown>
+        <div className="min-h-full bg-gray-900 p-4">
+          <ReactMarkdown
+            /* @ts-ignore */
+            rehypePlugins={rehypePlugins}
+            components={{
+              code: (props: any) => {
+                const { node, ...rest } = props;
+                return <code {...rest} />;
+              },
+            }}
+          >
+            {currentContent}
+          </ReactMarkdown>
+        </div>
       </div>
     );
-  },
+  }
 );
 
 export const CopyCodeButton: React.FC<{ content: string }> = ({ content }) => {
